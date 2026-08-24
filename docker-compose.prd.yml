@@ -1,0 +1,44 @@
+# Sobe o ambiente de PRODUCAO (profile prd) usando a imagem publicada no
+# Docker Hub. O schema do banco e criado pelo proprio container MySQL
+# (docker/mysql/init/schema.sql), nunca pela aplicacao.
+#
+# Uso:
+#   docker compose -f docker-compose.prd.yml up -d
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: mysql-escola-prd
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: api_escola
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_escola_prd_data:/var/lib/mysql
+      - ./docker/mysql/init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    # Troque pela imagem publicada, ex: seuusuario/api-escola:latest
+    image: gustavooda/api-escola:latest
+    container_name: api-escola-prd
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: prd
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_NAME: api_escola
+      DB_USER: root
+      DB_PASSWORD: root
+    ports:
+      - "8080:8080"
+
+volumes:
+  mysql_escola_prd_data:
