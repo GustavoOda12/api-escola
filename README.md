@@ -197,4 +197,4 @@ docker push gustavooda/api-escola:latest
 | Nome | RM |
 |---|---|
 | Rafael Catapani Scharlack | 554633 |
-| _(preencher segundo integrante)_ | _(preencher)_ |
+| Gustavo Iudi Rosa Oda | 556754 |
