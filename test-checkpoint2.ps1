@@ -1,10 +1,13 @@
-# test-checkpoint1.ps1
-# Testa a aplicacao api-escola no profile "prd" via Docker, ponta a ponta.
+# test-checkpoint2.ps1
+# Testa a aplicacao api-escola (profile "prd") com SQL Server via Docker, ponta a ponta:
+# build da API a partir do Dockerfile, SQL Server + criacao do banco + API, e um
+# POST/GET em /alunos.
 # Uso: no PowerShell, na raiz do projeto (onde fica o Dockerfile), rode:
-#   .\test-checkpoint1.ps1
+#   .\test-checkpoint2.ps1
+# Requer as portas 1433 e 8080 livres (pare outros containers que as usem).
 
 $ErrorActionPreference = "Stop"
-$ImageName = "gustavooda/api-escola:latest"
+$ComposeFile = "docker-compose.prd.yml"
 
 function Step($msg) {
     Write-Host ""
@@ -24,17 +27,17 @@ $ErrorActionPreference = "Stop"
 if ($LASTEXITCODE -ne 0) { Fail "Docker Desktop nao esta rodando. Abra o Docker Desktop e tente novamente." }
 Write-Host "Docker OK" -ForegroundColor Green
 
-# 1. Build da imagem
-Step "Build da imagem $ImageName"
-docker build -t $ImageName .
+# 1. Build da imagem da API (definida em "build: ." no compose)
+Step "Build da imagem da API a partir do Dockerfile"
+docker compose -f $ComposeFile build
 if ($LASTEXITCODE -ne 0) { Fail "Build da imagem falhou. Veja o log de erro do Maven/Docker acima." }
 
-# 2. Sobe a stack prd do zero (garante schema.sql rodando de novo)
-Step "Derrubando ambiente anterior (se existir) e subindo mysql + app (docker-compose.prd.yml)"
+# 2. Sobe a stack prd do zero (volume zerado: banco recriado pelo servico db-init)
+Step "Derrubando ambiente anterior (se existir) e subindo sqlserver + db-init + app ($ComposeFile)"
 $ErrorActionPreference = "Continue"
-docker compose -f docker-compose.prd.yml down -v *> $null
+docker compose -f $ComposeFile down -v *> $null
 $ErrorActionPreference = "Stop"
-docker compose -f docker-compose.prd.yml up -d
+docker compose -f $ComposeFile up -d
 if ($LASTEXITCODE -ne 0) { Fail "Falha ao subir os containers com docker compose." }
 
 # 3. Espera a aplicacao responder (ate 60s)
@@ -53,7 +56,7 @@ Write-Host ""
 if (-not $ready) {
     Write-Host "Aplicacao nao respondeu a tempo. Ultimas linhas do log:" -ForegroundColor Yellow
     docker logs api-escola-prd --tail 80
-    Fail "A aplicacao nao ficou pronta. Procure por ''Schema-validation'' ou erro de conexao com o banco no log acima."
+    Fail "A aplicacao nao ficou pronta. Procure por erro de conexao/login com o SQL Server no log acima."
 }
 Write-Host "Aplicacao respondendo em http://localhost:8080" -ForegroundColor Green
 
@@ -78,6 +81,11 @@ Step "Testando GET /alunos"
 $list = Invoke-RestMethod -Uri "http://localhost:8080/alunos" -Method Get
 Write-Host "Total de alunos retornados: $($list.Count)" -ForegroundColor Green
 
+# 5b. Confere no proprio SQL Server que o banco e as tabelas foram criados
+Step "Conferindo banco api_escola e tabelas no SQL Server"
+docker exec sqlserver-escola-prd /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P "1q2w3e4R@" -d api_escola -Q "SELECT name AS tabela FROM sys.tables ORDER BY name"
+if ($LASTEXITCODE -ne 0) { Fail "Nao foi possivel consultar o banco api_escola no SQL Server." }
+
 # 6. Confere se o Swagger esta acessivel
 Step "Conferindo Swagger UI"
 $swagger = Invoke-WebRequest -Uri "http://localhost:8080/" -UseBasicParsing
@@ -87,9 +95,5 @@ Step "TUDO OK. Containers rodando:"
 docker ps --filter "name=escola"
 
 Write-Host ""
-Write-Host "Para publicar de verdade no Docker Hub, rode manualmente:" -ForegroundColor Cyan
-Write-Host "  docker login"
-Write-Host "  docker push $ImageName"
-Write-Host ""
 Write-Host "Para derrubar o ambiente de teste quando terminar:" -ForegroundColor Cyan
-Write-Host "  docker compose -f docker-compose.prd.yml down -v"
+Write-Host "  docker compose -f $ComposeFile down -v"

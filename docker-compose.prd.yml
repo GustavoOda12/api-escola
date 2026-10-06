@@ -1,44 +1,59 @@
-# Sobe o ambiente de PRODUCAO (profile prd) usando a imagem publicada no
-# Docker Hub. O schema do banco e criado pelo proprio container MySQL
-# (docker/mysql/init/schema.sql), nunca pela aplicacao.
+# Sobe o ambiente de PRODUCAO (profile prd). A API e construida localmente a
+# partir do Dockerfile (nao depende de imagem publicada no Docker Hub). O
+# servico "db-init" cria o banco api_escola (o container do SQL Server nao faz
+# isso sozinho) e as tabelas sao criadas pelo Hibernate (ddl-auto=update)
+# quando a API inicia.
 #
 # Uso:
-#   docker compose -f docker-compose.prd.yml up -d
+#   docker compose -f docker-compose.prd.yml up -d --build
 
 services:
-  mysql:
-    image: mysql:8.0
-    container_name: mysql-escola-prd
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:latest
+    container_name: sqlserver-escola-prd
     environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: api_escola
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "1q2w3e4R@"
     ports:
-      - "3306:3306"
+      - "1433:1433"
     volumes:
-      - mysql_escola_prd_data:/var/lib/mysql
-      - ./docker/mysql/init:/docker-entrypoint-initdb.d
+      - sqlserver_escola_prd_data:/var/opt/mssql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -Q \"SELECT 1\" || exit 1"]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 20
+      start_period: 15s
+
+  # Container descartavel: cria o banco e termina.
+  db-init:
+    image: mcr.microsoft.com/mssql/server:latest
+    container_name: sqlserver-escola-prd-init
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+    restart: "no"
+    environment:
+      MSSQL_SA_PASSWORD: "1q2w3e4R@"
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - /opt/mssql-tools18/bin/sqlcmd -C -S sqlserver -U sa -P "$$MSSQL_SA_PASSWORD" -Q "IF DB_ID('api_escola') IS NULL CREATE DATABASE api_escola;"
 
   app:
-    # Troque pela imagem publicada, ex: seuusuario/api-escola:latest
-    image: rscharlack/api-escola:latest
+    build: .
     container_name: api-escola-prd
     depends_on:
-      mysql:
-        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
     environment:
       SPRING_PROFILES_ACTIVE: prd
-      DB_HOST: mysql
-      DB_PORT: 3306
+      DB_HOST: sqlserver
+      DB_PORT: 1433
       DB_NAME: api_escola
-      DB_USER: root
-      DB_PASSWORD: root
+      DB_USER: sa
+      DB_PASSWORD: "1q2w3e4R@"
     ports:
       - "8080:8080"
 
 volumes:
-  mysql_escola_prd_data:
+  sqlserver_escola_prd_data:
